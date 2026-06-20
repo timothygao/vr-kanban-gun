@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VR项目进度看板</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --ink:#1d2129; --paper:#f6f4ef; --line:#dcd7ca; --card:#fff; --muted:#807a6d;
+    --todo:#ba7517; --doing:#2b6cb0; --stuck:#c53030; --done:#2f855a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:"PingFang SC","Microsoft YaHei",-apple-system,sans-serif;background:var(--paper);color:var(--ink);line-height:1.55;padding:22px 16px 70px;}
+  .wrap{max-width:1320px;margin:0 auto;}
+  header{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px;border-bottom:2px solid var(--ink);padding-bottom:12px;}
+  h1{font-size:25px;letter-spacing:-0.5px;}
+  .sub{color:var(--muted);font-size:13px;margin-top:2px;}
+  .status-bar{font-size:12.5px;color:var(--muted);margin:10px 0 18px;display:flex;align-items:center;gap:8px;}
+  .dot{width:8px;height:8px;border-radius:50%;background:#ccc;}
+  .dot.ok{background:var(--done);} .dot.err{background:var(--stuck);}
+  select,button,input,textarea{font-family:inherit;font-size:14px;padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);}
+  button.primary{background:var(--ink);color:#fff;border-color:var(--ink);cursor:pointer;font-weight:600;}
+  button.primary:hover{opacity:.88;}
+  button.ghost{cursor:pointer;background:transparent;}
+  button.ghost:hover{background:rgba(0,0,0,.04);}
+
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
+  .stat{background:rgba(0,0,0,.025);border-radius:8px;padding:12px 14px;}
+  .stat .l{font-size:12.5px;color:var(--muted);}
+  .stat .v{font-size:24px;font-weight:600;margin-top:2px;}
+  .stat .v.warn{color:var(--stuck);}
+
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;}
+
+  .board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  @media(max-width:920px){.board{grid-template-columns:1fr;} .stats{grid-template-columns:repeat(2,1fr);}}
+  .col{background:rgba(0,0,0,.02);border:1px solid var(--line);border-radius:10px;padding:11px;min-height:240px;}
+  .col h2{font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:11px;display:flex;align-items:center;gap:7px;}
+  .col h2 .count{font-size:11.5px;background:var(--ink);color:#fff;border-radius:20px;padding:1px 8px;margin-left:auto;}
+  .bar{width:3px;height:13px;border-radius:2px;}
+  .col[data-s=todo] .bar{background:var(--todo);}
+  .col[data-s=doing] .bar{background:var(--doing);}
+  .col[data-s=stuck] .bar{background:var(--stuck);}
+  .col[data-s=done] .bar{background:var(--done);}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:11px;margin-bottom:9px;cursor:grab;}
+  .card:active{cursor:grabbing;}
+  .card.stale{border-left:4px solid var(--stuck);}
+  .card.done{opacity:.65;}
+  .card .who{font-size:11.5px;color:var(--muted);font-weight:600;margin-bottom:3px;}
+  .card .task{font-weight:600;font-size:13.5px;margin-bottom:5px;}
+  .card .crit{font-size:11.5px;background:rgba(47,133,90,.08);border-radius:4px;padding:4px 6px;margin-top:5px;color:#1f5e3f;}
+  .card .due{margin-top:5px;font-size:11.5px;color:var(--muted);}
+  .card .due.over{color:var(--stuck);font-weight:600;}
+  .card .stalemsg{margin-top:5px;font-size:11.5px;color:var(--stuck);}
+  .card .del{float:right;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;}
+  .card .del:hover{color:var(--stuck);}
+
+  .log{margin-top:22px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;}
+  .log h3{font-size:14px;font-weight:600;margin-bottom:4px;}
+  .log .hint{font-size:12px;color:var(--muted);margin-bottom:12px;}
+  .log-add{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+  .log-add input{flex:1;min-width:120px;}
+  .log-row{display:flex;gap:10px;font-size:12.5px;padding:7px 0;border-top:1px solid var(--line);align-items:baseline;}
+  .log-row .lw{min-width:90px;font-weight:600;}
+  .log-row .ld{min-width:64px;color:var(--muted);}
+  .log-row .lt{flex:1;color:#444;}
+  .log-row .lx{color:var(--muted);cursor:pointer;}
+  .log-row .lx:hover{color:var(--stuck);}
+
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;padding:16px;z-index:50;}
+  .overlay.show{display:flex;}
+  .modal{background:var(--paper);border-radius:12px;padding:24px;width:100%;max-width:480px;}
+  .modal h3{margin-bottom:16px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:13px;font-weight:600;margin-bottom:4px;}
+  .field input,.field textarea{width:100%;}
+  .field textarea{resize:vertical;min-height:56px;}
+  .field .fh{font-size:11px;color:var(--muted);margin-top:3px;}
+  .modal-actions{display:flex;gap:10px;justify-content:flex-end;}
+
+  .setup{background:#fff7e6;border:1px solid #f0c674;border-radius:8px;padding:13px 16px;font-size:12.5px;line-height:1.7;margin-bottom:16px;}
+  .setup code{background:rgba(0,0,0,.06);padding:1px 5px;border-radius:3px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <h1 id="groupTitle" onclick="editTitle()" title="点击修改标题" style="cursor:text;">VR项目进度看板</h1>
+    <div class="sub">想清楚做什么、做到什么程度、让队友也清清楚楚</div>
+  </div>
+  <button class="primary" onclick="openModal()">+ 新建任务</button>
+</header>
+
+<div class="status-bar"><span class="dot" id="connDot"></span><span id="connText">正在连接云端…</span></div>
+
+<div class="setup" id="setupNote" style="display:none;">
+  <strong>预览模式 — 数据不会保存。</strong>按配套《配置说明》填好 Supabase 的两个值后，即可多人协作、云端同步。
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="l">总任务</div><div class="v" id="s_total">0</div></div>
+  <div class="stat"><div class="l">进行中</div><div class="v" id="s_doing">0</div></div>
+  <div class="stat"><div class="l">需要关注</div><div class="v warn" id="s_warn">0</div></div>
+  <div class="stat"><div class="l">完成率</div><div class="v" id="s_rate">0%</div></div>
+</div>
+
+<div class="toolbar" id="toolbar">
+  <select id="filterTeam" onchange="onTeamFilter()"></select>
+  <select id="filterWho" onchange="render()"><option value="">全部成员</option></select>
+</div>
+
+<div class="board" id="board"></div>
+
+<div class="log" id="workload" style="margin-top:18px;">
+  <h3>成长轨迹</h3>
+  <div class="hint">每个人一路走来的进展 —— 看看大家各自推进到哪里了。</div>
+  <div id="wlList"></div>
+</div>
+
+<div class="log" id="ganttBox" style="margin-top:18px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+    <div>
+      <h3>项目时间线</h3>
+      <div class="hint">任务按时间铺开，看清整个项目的推进节奏。</div>
+    </div>
+    <div style="display:flex;gap:6px;">
+      <button class="ghost" id="gv_stage" onclick="setGanttView('stage')">按阶段</button>
+      <button class="ghost" id="gv_person" onclick="setGanttView('person')">按成员</button>
+    </div>
+  </div>
+  <div id="ganttList" style="margin-top:12px;overflow-x:auto;"></div>
+</div>
+
+<div class="log">
+  <h3><i></i>每日随记</h3>
+  <div class="hint">花一分钟记一下，不用写长。这几栏填好，自己也更清楚卡在哪、下一步做什么。</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+    <select id="lg_who"></select>
+    <select id="lg_state">
+      <option value="推进顺利">推进顺利</option>
+      <option value="有点卡">有点卡</option>
+      <option value="明显卡住">明显卡住</option>
+      <option value="等待他人">等待他人</option>
+    </select>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:8px;">
+    <input id="lg_did" placeholder="今天做了什么（如 完成城墙模块化模型，导入Unity测试）">
+    <input id="lg_prog" placeholder="完成到什么程度（如 基础模型完成，贴图40%）">
+    <input id="lg_stuck" placeholder="卡在哪里（没有就留空）">
+    <input id="lg_next" placeholder="下一步准备做什么">
+  </div>
+  <div class="log-add" style="margin-bottom:14px;">
+    <button class="primary" onclick="addLog()" style="flex:0 0 auto;">记下来</button>
+  </div>
+  <div id="logList"></div>
+</div>
+
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3>新建任务</h3>
+    <div class="field"><label>完成人</label><select id="f_who"></select></div>
+    <div class="field"><label>做什么</label><input id="f_task" placeholder="例如：完成PVE射击手感验证"></div>
+    <div class="field"><label>什么时候开始</label><input id="f_start" type="date"></div>
+    <div class="field"><label>什么时候完成</label><input id="f_due" type="date"></div>
+    <div class="field"><label>完成的标准是什么</label><textarea id="f_crit" placeholder="例如：能开枪、有击中反馈、3人试玩确认手感"></textarea>
+      <div class="fh">写不出完成标准的任务，就是还没想清楚的任务 —— 不允许新建。</div></div>
+    <div class="modal-actions"><button class="ghost" onclick="closeModal()">取消</button><button class="primary" onclick="addCard()">创建</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="titleOverlay">
+  <div class="modal">
+    <h3>修改看板标题</h3>
+    <div class="field"><input id="t_input" placeholder="输入新标题"></div>
+    <div class="modal-actions"><button class="ghost" onclick="closeTitle()">取消</button><button class="primary" onclick="saveTitle()">保存</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="memOverlay">
+  <div class="modal">
+    <h3>管理成员</h3>
+    <div id="memList" style="margin-bottom:12px;"></div>
+    <div class="log-add" style="margin-bottom:8px;">
+      <input id="m_input" placeholder="输入新成员名字" style="flex:1;">
+      <button class="primary" onclick="addMember()">添加</button>
+    </div>
+    <div class="fh" style="font-size:11px;color:var(--muted);">删除成员不会删掉他名下的任务，只是从筛选名单里移除。</div>
+    <div class="modal-actions"><button class="ghost" onclick="closeMem()">完成</button></div>
+  </div>
+</div>
+
+<script>
+const SB_URL="https://vtrnsmiahgbntgyjzgvb.supabase.co";
+const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ0cm5zbWlhaGdibnRneWp6Z3ZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4NzE2ODQsImV4cCI6MjA5NzQ0NzY4NH0.SQoVp3ZhZ9HmgL5TGRZtlDSgVEGH-bDLsgtJp4Mterw";
+const GROUP="VR项目";
+const TBL_TASKS="tasks_fang";
+const TBL_LOG="worklog_fang";
+// 本页面看哪个组："" = 教师总览(看全部+可筛选)；"弓箭组"或"枪组" = 学生页(锁定本组)
+const TEAM_VIEW="枪组";
+// 各组成员
+const TEAMS={"弓箭组":["李沅昊","方子豪"],"枪组":["吴陈程","章清凯"]};
+
+const COLS=[{s:"todo",name:"待办"},{s:"doing",name:"进行中"},{s:"stuck",name:"卡住了"},{s:"done",name:"已完成"}];
+let sb=null,cards=[],logs=[];
+const configured=SB_URL!=="YOUR_SUPABASE_URL"&&SB_KEY!=="YOUR_SUPABASE_ANON_KEY";
+const dot=document.getElementById("connDot"),connText=document.getElementById("connText");
+
+function lsGet(k,def){try{const v=localStorage.getItem(k);return v===null?def:v;}catch(e){return def;}}
+function lsSet(k,v){try{localStorage.setItem(k,v);}catch(e){}}
+const defaultTitle=TEAM_VIEW?(TEAM_VIEW+" · 进度看板"):(GROUP+" · 教师总览");
+let title=lsGet("kb_title_"+(TEAM_VIEW||"all"),defaultTitle);
+// 当前页可见的成员：学生页=本组；教师页=两组合并
+let members=TEAM_VIEW?TEAMS[TEAM_VIEW].slice():[].concat(...Object.values(TEAMS));
+// 根据人名反查所属组
+function teamOf(name){for(const t in TEAMS){if(TEAMS[t].includes(name))return t;}return "";}
+// 教师页当前筛选的组（""=全部）
+let teamFilter="";
+
+function editTitle(){
+  document.getElementById("t_input").value=title;
+  document.getElementById("titleOverlay").classList.add("show");
+  setTimeout(()=>document.getElementById("t_input").focus(),50);
+}
+function closeTitle(){document.getElementById("titleOverlay").classList.remove("show");}
+function saveTitle(){
+  const v=document.getElementById("t_input").value.trim();
+  if(v){title=v;lsSet("kb_title_"+(TEAM_VIEW||"all"),title);document.getElementById("groupTitle").textContent=title;}
+  closeTitle();
+}
+function editMembers(){renderMemList();document.getElementById("memOverlay").classList.add("show");}
+function closeMem(){document.getElementById("memOverlay").classList.remove("show");}
+function renderMemList(){
+  const el=document.getElementById("memList");el.innerHTML="";
+  if(!members.length){el.innerHTML='<div style="font-size:12.5px;color:var(--muted);">还没有成员，下面添加</div>';return;}
+  members.forEach((m,i)=>{
+    const r=document.createElement("div");
+    r.style.cssText="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-top:1px solid var(--line);font-size:14px;";
+    r.innerHTML=`<span>${m}</span><span style="color:var(--muted);cursor:pointer;font-size:13px;" onclick="delMember(${i})">删除</span>`;
+    el.appendChild(r);
+  });
+}
+function addMember(){
+  const v=document.getElementById("m_input").value.trim();
+  if(v&&!members.includes(v)){members.push(v);lsSet("kb_members",JSON.stringify(members));renderMemList();render();}
+  document.getElementById("m_input").value="";
+}
+function delMember(i){
+  members.splice(i,1);lsSet("kb_members",JSON.stringify(members));renderMemList();render();
+}
+
+async function init(){
+  document.getElementById("groupTitle").textContent=title;
+  setupToolbar();
+  fillNameSelects();
+  if(!configured){
+    connText.textContent="未配置云端 — 当前为预览，数据不会保存。";
+    document.getElementById("setupNote").style.display="block";
+    cards=[
+      {id:1,who:"方子豪",task:"旧工程VR化移植与底层排坑",start:"2026-06-02",due:"2026-06-08",crit:"SetTimeScale/CollideTag报错修复，VR环境能跑通",status:"done",updated:new Date(Date.now()-12*864e5).toISOString()},
+      {id:2,who:"方子豪",task:"白盒结构搭建（PVE/PVP）",start:"2026-06-09",due:"2026-06-15",crit:"PVE/PVP白盒关卡结构搭好，掩体高度/竹林缝隙戴头显测过",status:"done",updated:new Date(Date.now()-5*864e5).toISOString()},
+      {id:3,who:"李沅昊",task:"场景美术资产生成",start:"2026-06-09",due:"2026-06-18",crit:"核心物料（长弓/箭）精模，场景简模+风格化，AI图转3D流程跑通",status:"doing",updated:new Date().toISOString()},
+      {id:4,who:"方子豪",task:"第一人称体感交互精调",start:"2026-06-16",due:"2026-06-22",crit:"长弓拆分进VR，抓取/拉弓抛物线手感OK，解决射击穿模",status:"doing",updated:new Date().toISOString()},
+      {id:5,who:"李沅昊",task:"白盒填美术（场景搭建）",start:"2026-06-16",due:"2026-06-24",crit:"把美术资产填进白盒，大雾/光影藏拙，第一人称视野内完整",status:"todo",updated:new Date().toISOString()},
+      {id:6,who:"方子豪",task:"UI封装与整体包装",start:"2026-06-23",due:"2026-06-29",crit:"VR空间UI做好，流程串通，清残余报错，打包演示版",status:"todo",updated:new Date().toISOString()},
+      {id:7,who:"章清凯",task:"水下场景白盒与漫游路线",start:"2026-06-12",due:"2026-06-20",crit:"水下漫游路线通，玩家能前进/转向不晕",status:"doing",updated:new Date(Date.now()-7*864e5).toISOString()},
+      {id:8,who:"吴陈程",task:"水体与水下后处理",start:"2026-06-14",due:"2026-06-22",crit:"水面+水下渲染统一，整合进场景",status:"doing",updated:new Date().toISOString()},
+    ];
+    logs=[
+      {id:1,who:"方子豪",text:"做了：VR移植，排底层报错　进度：环境跑通　下一步：搭白盒结构　【推进顺利】",created:new Date(Date.now()-11*864e5).toISOString()},
+      {id:2,who:"李沅昊",text:"做了：长弓建模＋拆组件　进度：精模完成，贴图40%　卡在：UV接缝处理不好　下一步：看教程重做UV　【有点卡】",created:new Date(Date.now()-2*864e5).toISOString()},
+      {id:3,who:"李沅昊",text:"做了：铺场景简模　进度：主体完成　卡在：导入后碰撞体太复杂，Pico掉帧　下一步：换低模碰撞体　【明显卡住】",created:new Date(Date.now()-1*864e5).toISOString()},
+      {id:4,who:"吴陈程",text:"做了：水体迭代第4版　进度：接近完成　下一步：整合水下后处理　【推进顺利】",created:new Date(Date.now()-1*864e5).toISOString()},
+    ];
+    render();renderLogs();renderWorkload();renderGantt();return;
+  }
+  sb=supabase.createClient(SB_URL,SB_KEY);
+  await loadAll();
+  try{
+    sb.channel("k").on("postgres_changes",{event:"*",schema:"public",table:TBL_TASKS},loadAll)
+      .on("postgres_changes",{event:"*",schema:"public",table:TBL_LOG},loadAll).subscribe();
+  }catch(e){/* 实时订阅不可用也没关系，操作后会自动刷新 */}
+}
+async function loadAll(){
+  try{
+    const t=await sb.from(TBL_TASKS).select("*").order("updated",{ascending:false});
+    const l=await sb.from(TBL_LOG).select("*").order("created",{ascending:false});
+    if(t.error){dot.className="dot err";connText.textContent="连接失败："+t.error.message;return;}
+    dot.className="dot ok";connText.textContent="✓ 进度已实时保存";
+    cards=t.data||[];logs=l.data||[];
+    render();renderLogs();renderWorkload();renderGantt();
+  }catch(e){
+    dot.className="dot err";connText.textContent="加载出错："+(e&&e.message?e.message:e);
+  }
+}
+function daysLeft(d){if(!d)return null;return Math.ceil((new Date(d+"T23:59:59")-new Date())/864e5);}
+function isStale(c){if(c.status==="done")return false;return (Date.now()-new Date(c.updated).getTime())>5*864e5;}
+function staleDays(c){return Math.floor((Date.now()-new Date(c.updated).getTime())/864e5);}
+
+let ganttView="stage";
+function setGanttView(v){
+  ganttView=v;
+  document.getElementById("gv_stage").style.background=v==="stage"?"rgba(0,0,0,.06)":"transparent";
+  document.getElementById("gv_person").style.background=v==="person"?"rgba(0,0,0,.06)":"transparent";
+  renderGantt();
+}
+function stageOf(c){
+  // 简单按完成度/状态归阶段，你也可在任务名里带"前期/开发/测试"自动归类
+  const t=(c.task||"")+(c.crit||"");
+  if(/调研|访谈|问卷|分析|概念|brief|proposal/i.test(t))return "前期调研";
+  if(/测试|试玩|答辩|优化|调试/i.test(t))return "测试优化";
+  return "开发制作";
+}
+function renderGantt(){
+  const box=document.getElementById("ganttList");box.innerHTML="";
+  const withDates=scoped(cards).filter(c=>c.start&&c.due);
+  if(!withDates.length){box.innerHTML='<div style="font-size:12.5px;color:var(--muted);padding:8px 0;">还没有带"开始+完成"时间的任务。新建任务时填上开始时间，这里就会画出时间条。</div>';return;}
+  // time range
+  const all=withDates.flatMap(c=>[new Date(c.start),new Date(c.due)]);
+  let min=new Date(Math.min(...all)),max=new Date(Math.max(...all));
+  const span=Math.max(1,(max-min)/864e5);
+  const colorOf=s=>s==="done"?"var(--done)":s==="stuck"?"var(--stuck)":s==="doing"?"var(--doing)":"#b5651d";
+  // group
+  const groups={};
+  withDates.forEach(c=>{const k=ganttView==="person"?c.who:stageOf(c);(groups[k]=groups[k]||[]).push(c);});
+  const order=ganttView==="stage"?["前期调研","开发制作","测试优化"]:Object.keys(groups).sort();
+  // axis labels (start / mid / end)
+  const fmt=d=>`${d.getMonth()+1}/${d.getDate()}`;
+  box.innerHTML=`<div style="display:flex;font-size:11px;color:var(--muted);margin-bottom:6px;padding-left:130px;">
+    <span style="flex:1;">${fmt(min)}</span><span style="flex:1;text-align:center;">${fmt(new Date((+min+ +max)/2))}</span><span style="text-align:right;">${fmt(max)}</span></div>`;
+  order.forEach(k=>{
+    if(!groups[k])return;
+    const header=document.createElement("div");
+    header.style.cssText="font-size:12px;font-weight:600;color:var(--muted);margin:10px 0 4px;";
+    header.textContent=k;
+    box.appendChild(header);
+    groups[k].forEach(c=>{
+      const s=new Date(c.start),e=new Date(c.due);
+      const left=(s-min)/864e5/span*100;
+      const width=Math.max(2,(e-s)/864e5/span*100);
+      const row=document.createElement("div");
+      row.style.cssText="display:flex;align-items:center;gap:8px;margin-bottom:5px;";
+      row.innerHTML=`
+        <span style="width:122px;font-size:12px;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${c.task}">${c.task}</span>
+        <span style="flex:1;position:relative;height:18px;background:rgba(0,0,0,.03);border-radius:4px;">
+          <span style="position:absolute;left:${left}%;width:${width}%;height:18px;background:${colorOf(c.status)};border-radius:4px;opacity:${c.status==="done"?.55:1};" title="${c.who} · ${c.start}→${c.due}"></span>
+        </span>
+        <span style="font-size:11px;color:var(--muted);width:46px;flex-shrink:0;">${c.who}</span>`;
+      box.appendChild(row);
+    });
+  });
+}
+function renderWorkload(){
+  const el=document.getElementById("wlList");el.innerHTML="";
+  const sc=scoped(cards);
+  const names=[...new Set(sc.map(c=>c.who))].sort();
+  if(!names.length){el.innerHTML='<div style="font-size:12.5px;color:var(--muted);padding:8px 0;">还没有任务</div>';return;}
+  const stat=names.map(n=>{
+    const total=sc.filter(c=>c.who===n).length;
+    const done=sc.filter(c=>c.who===n&&c.status==="done").length;
+    return {who:n,total,done,undone:total-done,rate:total?Math.round(done/total*100):0};
+  });
+  const maxTotal=Math.max(1,...stat.map(s=>s.total));
+  stat.forEach(s=>{
+    const donePct=s.total?s.done/s.total*100:0;
+    const wrap=document.createElement("div");
+    wrap.style.cssText="padding:12px 0;border-top:1px solid var(--line);";
+    wrap.innerHTML=`
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <span style="font-weight:600;font-size:14px;">${s.who}</span>
+        <span style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:20px;font-weight:600;color:var(--done);">${s.rate}%</span>
+          <span style="font-size:11.5px;color:var(--muted);">完成率</span>
+        </span>
+      </div>
+      <div style="display:flex;height:22px;border-radius:5px;overflow:hidden;background:#eceae3;width:${Math.round(s.total/maxTotal*100)}%;min-width:80px;">
+        <div style="width:${donePct}%;background:var(--done);" title="已完成 ${s.done}"></div>
+        <div style="flex:1;background:var(--doing);opacity:.35;" title="未完成 ${s.undone}"></div>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:7px;font-size:11.5px;color:var(--muted);">
+        <span>总任务 <b style="color:var(--ink);">${s.total}</b></span>
+        <span><span style="display:inline-block;width:8px;height:8px;background:var(--done);border-radius:2px;vertical-align:middle;margin-right:3px;"></span>已完成 <b style="color:var(--ink);">${s.done}</b></span>
+        <span><span style="display:inline-block;width:8px;height:8px;background:var(--doing);opacity:.4;border-radius:2px;vertical-align:middle;margin-right:3px;"></span>未完成 <b style="color:var(--ink);">${s.undone}</b></span>
+      </div>`;
+    el.appendChild(wrap);
+  });
+}
+function activeTeam(){return TEAM_VIEW||teamFilter;}
+function scoped(arr){const t=activeTeam();return t?arr.filter(x=>teamOf(x.who)===t):arr;}
+function render(){
+  // 成员下拉：按当前组范围显示
+  const who=document.getElementById("filterWho"),cur=who.value;
+  const t=activeTeam();
+  const pool=t?(TEAMS[t]||[]):members;
+  who.innerHTML='<option value="">全部成员</option>'+pool.map(m=>`<option ${m===cur?"selected":""}>${m}</option>`).join("");
+  const f=who.value;
+  const vis=scoped(cards).filter(c=>!f||c.who===f);
+  document.getElementById("s_total").textContent=vis.length;
+  document.getElementById("s_doing").textContent=vis.filter(c=>c.status==="doing").length;
+  document.getElementById("s_warn").textContent=vis.filter(c=>isStale(c)||(c.status!=="done"&&daysLeft(c.due)!==null&&daysLeft(c.due)<0)).length;
+  document.getElementById("s_rate").textContent=vis.length?Math.round(vis.filter(c=>c.status==="done").length/vis.length*100)+"%":"0%";
+  const board=document.getElementById("board");board.innerHTML="";
+  COLS.forEach(col=>{
+    const list=vis.filter(c=>c.status===col.s);
+    const el=document.createElement("div");el.className="col";el.dataset.s=col.s;
+    el.innerHTML=`<h2><span class="bar"></span>${col.name}<span class="count">${list.length}</span></h2>`;
+    el.ondragover=e=>e.preventDefault();
+    el.ondrop=e=>{e.preventDefault();move(e.dataTransfer.getData("id"),col.s);};
+    list.forEach(c=>el.appendChild(cardEl(c)));
+    board.appendChild(el);
+  });
+}
+function setupToolbar(){
+  const tf=document.getElementById("filterTeam");
+  if(TEAM_VIEW){
+    // 学生页：锁定本组，隐藏筛选工具栏
+    document.getElementById("toolbar").style.display="none";
+  }else{
+    // 教师页：组筛选下拉
+    tf.innerHTML='<option value="">全部组</option>'+Object.keys(TEAMS).map(t=>`<option value="${t}">${t}</option>`).join("");
+  }
+}
+function onTeamFilter(){
+  teamFilter=document.getElementById("filterTeam").value;
+  document.getElementById("filterWho").value="";
+  fillNameSelects();
+  render();renderWorkload();renderGantt();
+}
+function fillNameSelects(){
+  const t=activeTeam();
+  const pool=t?(TEAMS[t]||[]):members;
+  ["f_who","lg_who"].forEach(id=>{
+    const el=document.getElementById(id);if(!el)return;
+    el.innerHTML=pool.map(m=>`<option>${m}</option>`).join("");
+  });
+}
+function cardEl(c){
+  const d=document.createElement("div");
+  d.className="card"+(isStale(c)?" stale":"")+(c.status==="done"?" done":"");
+  d.draggable=true;d.ondragstart=e=>e.dataTransfer.setData("id",c.id);
+  const dl=daysLeft(c.due);let due="";
+  if(c.due){const over=dl!==null&&dl<0&&c.status!=="done";const txt=dl<0?`已超期 ${-dl} 天`:dl===0?"今天截止":`还剩 ${dl} 天`;due=`<div class="due ${over?"over":""}">⏱ ${c.due}（${txt}）</div>`;}
+  d.innerHTML=`<span class="del" onclick="delCard('${c.id}')">×</span>
+    <div class="who">${c.who}</div><div class="task">${c.task}</div>
+    ${c.crit?`<div class="crit">✓ ${c.crit}</div>`:""}${due}
+    ${isStale(c)?`<div class="stalemsg">已 ${staleDays(c)} 天没更新</div>`:""}`;
+  return d;
+}
+function renderLogs(){
+  const el=document.getElementById("logList");el.innerHTML="";
+  scoped(logs).forEach(g=>{
+    const d=new Date(g.created);const ds=`${d.getMonth()+1}-${String(d.getDate()).padStart(2,"0")}`;
+    let edge="var(--line)";
+    if(/明显卡住/.test(g.text))edge="var(--stuck)";
+    else if(/有点卡|等待他人/.test(g.text))edge="var(--todo)";
+    else if(/推进顺利/.test(g.text))edge="var(--done)";
+    const r=document.createElement("div");
+    r.style.cssText=`padding:8px 10px;border-left:3px solid ${edge};background:rgba(0,0,0,.015);border-radius:0 6px 6px 0;margin-bottom:7px;font-size:12.5px;position:relative;`;
+    r.innerHTML=`<span style="font-weight:600;">${g.who}</span>
+      <span style="color:var(--muted);margin-left:6px;">${ds}</span>
+      <span class="lx" style="position:absolute;right:8px;top:8px;color:var(--muted);cursor:pointer;" onclick="delLog('${g.id}')">×</span>
+      <div style="margin-top:4px;color:#444;line-height:1.6;">${g.text}</div>`;
+    el.appendChild(r);
+  });
+}
+function openModal(){document.getElementById("overlay").classList.add("show");}
+function closeModal(){document.getElementById("overlay").classList.remove("show");}
+async function addCard(){
+  const who=f_who.value.trim(),task=f_task.value.trim(),start=f_start.value,due=f_due.value,crit=f_crit.value.trim();
+  if(!who||!task){alert("请填写负责人和任务");return;}
+  if(!crit){alert("必须写完成标准 — 写不出说明还没想清楚");return;}
+  const rec={who,task,start,due,crit,status:"todo",updated:new Date().toISOString()};
+  if(configured){const{error}=await sb.from(TBL_TASKS).insert(rec);if(error){alert("保存失败："+error.message);return;}await loadAll();}
+  else{rec.id=Date.now();cards.unshift(rec);render();renderWorkload();renderGantt();}
+  f_who.value="";f_start.value="";f_due.value="";f_task.value="";f_crit.value="";closeModal();
+}
+async function move(id,status){
+  const c=cards.find(x=>x.id==id);
+  if(configured){
+    const{error}=await sb.from(TBL_TASKS).update({status,updated:new Date().toISOString()}).eq("id",id);
+    if(error){alert("更新失败："+error.message);return;}
+    await loadAll();
+  }
+  else{if(c){c.status=status;c.updated=new Date().toISOString();render();renderWorkload();renderGantt();}}
+}
+async function delCard(id){
+  if(!confirm("删除这个任务？"))return;
+  if(configured){
+    const{error}=await sb.from(TBL_TASKS).delete().eq("id",id);
+    if(error){alert("删除失败："+error.message);return;}
+    await loadAll();
+  }
+  else{cards=cards.filter(x=>x.id!=id);render();renderWorkload();renderGantt();}
+}
+async function addLog(){
+  const who=lg_who.value.trim();
+  const did=lg_did.value.trim(),prog=lg_prog.value.trim(),stuck=lg_stuck.value.trim(),next=lg_next.value.trim();
+  const state=lg_state.value;
+  if(!who||!did){alert("至少填一下名字和今天做了什么");return;}
+  const parts=[];
+  parts.push("做了："+did);
+  if(prog)parts.push("进度："+prog);
+  if(stuck)parts.push("卡在："+stuck);
+  if(next)parts.push("下一步："+next);
+  parts.push("【"+state+"】");
+  const text=parts.join("　");
+  const rec={who,text,created:new Date().toISOString()};
+  if(configured){const{error}=await sb.from(TBL_LOG).insert(rec);if(error){alert("保存失败："+error.message);return;}await loadAll();}
+  else{rec.id=Date.now();logs.unshift(rec);renderLogs();}
+  lg_who.value="";lg_did.value="";lg_prog.value="";lg_stuck.value="";lg_next.value="";
+}
+async function delLog(id){
+  if(configured){const{error}=await sb.from(TBL_LOG).delete().eq("id",id);if(error){alert("删除失败："+error.message);return;}await loadAll();}
+  else{logs=logs.filter(x=>x.id!=id);renderLogs();}
+}
+setGanttView("stage");
+init();
+</script>
+</body>
+</html>
